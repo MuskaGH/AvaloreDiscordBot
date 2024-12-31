@@ -1,22 +1,22 @@
 import discord
+from discord.ext import commands
 
-from utils import send_message
+from utils import send_avalore_update_message, read_avalore_update_file
 
-# 02: Create a new bot client
-Intents = discord.Intents.default() # Intents object with the default intents (messages, reactions, etc.) used by the bot
+# Creates a new bot client with the default intents and enables message content intent
+Intents = discord.Intents.default() # Intents object with the default intents (messages, reactions, etc.)
 Intents.message_content = True # Enable message content intent to receive message content in on_message event since it's disabled by default
-Client = discord.Client(intents=Intents) # Create a new bot client with the intents
+Client = commands.Bot(command_prefix='!Avalore.', intents=Intents) # Create a new bot client with the intents
 
+# Decorator to register an on_ready event (whenever the bot is connected to Discord Server)
 @Client.event
 async def on_ready() -> None:
     print(f'{Client.user} has connected to Discord Server!') # Print the bot's username and ID to the console when connected to Discord Server
 
-# Handles the event when a message is sent in a channel where the bot has access
-@Client.event
-async def on_message(message: discord.Message) -> None:
-    if message.author == Client.user: # Check if the message was sent by the bot itself
-        return
-
-    print(f'{message.author.name} sent: {message.content}') # Print the message content and author's name to the console
-
-    await send_message(message, message.content) # Send a response based on the message content
+# Decorator to register a new command named announce_avalore_update (can be invoked using !announce_avalore_update)
+@Client.command(name='announce_avalore_update')
+async def announce_avalore_update(ctx: commands.Context) -> None:
+    if ctx.author.id != 597689905040064522: # Check if the user invoking the command is muskadev (id: 597689905040064522)
+        return # Ignore the command if the user is not muskadev
+    update_message = read_avalore_update_file('avalore_update_data.txt') # Read the update information from the file
+    await send_avalore_update_message(ctx.channel, update_message) # Send the update message to the same channel where the command was invoked

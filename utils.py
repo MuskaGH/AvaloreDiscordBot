@@ -1,13 +1,22 @@
 import discord
 
-# Provides a response to the user based on the message content
-async def send_message(message: discord.Message, user_message: str) -> None:
-    # Check if the message is empty (no content, embeds, or attachments)
-    if not message.content and not message.embeds and not message.attachments:
-        print("Message was empty (no content, embeds, or attachments).")
-        return
-    
+# Reads the update information from a text file and formats it as an ini code block
+def read_avalore_update_file(file_path: str) -> str:
     try:
-        await message.channel.send("Hey! I'm Avalore bot developed by Muska") # Send the response to the same channel where the message was received
+        with open(file_path, 'r') as file:
+            lines = file.readlines()
+            formatted_lines = ["**New commit to Avalore's GitHub repository detected!**", "```ini"]
+            for line in lines:
+                formatted_lines.append(line.strip())
+            formatted_lines.append("```")
+            return "\n".join(formatted_lines)
+    except Exception as e:
+        print(e)
+        return "Failed to read update file."
+
+# Sends an update message to a specified channel
+async def send_avalore_update_message(channel: discord.TextChannel, update_message: str) -> None:
+    try:
+        await channel.send(update_message) # Send the update message to the specified channel
     except Exception as e:
         print(e)
