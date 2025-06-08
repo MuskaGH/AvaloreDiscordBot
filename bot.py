@@ -32,6 +32,9 @@ async def announce_avalore_update(ctx: commands.Context) -> None:
         confirmation = await Client.wait_for('message', check=check, timeout=constants.AVALORE_UPDATE_TIMOUT_LIMIT)
         if confirmation: # If the confirmation message is received
             channel = Client.get_channel(constants.CHANNEL_ID_PATCHES) # Get the 'channel' object from the channel ID
-            await send_avalore_update_message(channel, read_avalore_update_file('avalore_update_data.txt')) # Send the update message to the 'patches' channel
+            if isinstance(channel, discord.TextChannel): # Check if the channel is a TextChannel
+                await send_avalore_update_message(channel, read_avalore_update_file('avalore_update_data.txt')) # Send the update message to the 'patches' channel
+            else:
+                await ctx.send("Error: The specified channel is not a text channel or could not be found.")
     except asyncio.TimeoutError: # If the timeout limit is reached without receiving the confirmation message (the user didn't reply with 'yes')
         await ctx.send("Update announcement cancelled. Please try again.") # Send a message to the command invoker that the update announcement is cancelled

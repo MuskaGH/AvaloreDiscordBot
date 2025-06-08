@@ -1,6 +1,6 @@
 [Author] Martin Musil
-[Title] V0.111.0
+[Title] V0.160.0
 
 [Changes]
-- Added PlayFab Plugin
-- Complete overhaul of the 'DamageDealtOnScreen' Widget -> now called 'OnScreenQuickInfo' and it supports multiple types of data
+- Project has been upgraded to Unreal Engine 5.6.0.
+- Slowly progressing the logic within the C++ PlayerController classes
