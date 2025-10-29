@@ -57,7 +57,13 @@ When you first run the bot, it needs to know which commit to start from. You hav
 
 ### 4. Run the Bot
 
-Simply run your bot as usual:
+You have two options to run the bot:
+
+**Option A: Using the batch file (Easy - Recommended for Windows)**
+- Simply double-click `start_bot.bat` in your project folder
+- A command window will open and the bot will start
+
+**Option B: Using command line**
 ```bash
 python main.py
 ```
@@ -67,6 +73,8 @@ You should see:
 [Bot Username] has connected to Discord Server!
 GitHub commit checker started. Checking every 5 minutes...
 ```
+
+**Note**: Keep the window open while the bot is running. Closing it will stop the bot.
 
 ### 5. Test the Automation
 

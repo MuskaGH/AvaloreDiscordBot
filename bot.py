@@ -38,7 +38,7 @@ async def check_github_commits() -> None:
 async def before_check_github_commits() -> None:
     """Wait until the bot is ready before starting the background task."""
     await Client.wait_until_ready()
-    print("GitHub commit checker started. Checking every 5 minutes...")
+    print("GitHub commit checker started. Checking every 60 seconds...")
 
 # Decorator to register an on_ready event (whenever the bot is connected to Discord Server)
 @Client.event

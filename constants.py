@@ -12,5 +12,5 @@ AVALORE_UPDATE_TIMOUT_LIMIT = 10.0
 GITHUB_REPO_OWNER = "MuskaGH"
 GITHUB_REPO_NAME = "Avalore"
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")  # Load from .env file
-GITHUB_CHECK_INTERVAL = 300  # Check every 5 minutes (300 seconds)
+GITHUB_CHECK_INTERVAL = 60  # Check every 1 minute (60 seconds)
 LAST_COMMIT_FILE = "last_commit.txt"  # File to store the last processed commit SHA
