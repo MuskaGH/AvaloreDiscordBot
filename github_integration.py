@@ -164,19 +164,26 @@ class GitHubMonitor:
     
     async def check_for_new_commits(self) -> Optional[str]:
         """Check for new commits and return formatted message if found."""
+        print("Checking GitHub for new commits...")
+        
         latest_commit = await self.get_latest_commit()
         
         if not latest_commit:
+            print("Failed to fetch latest commit from GitHub")
             return None
         
         latest_sha = latest_commit.get('sha')
         if not latest_sha:
+            print("No commit SHA found in response")
             return None
-            
+        
+        latest_sha_short = latest_sha[:7]
         last_processed_sha = self.get_last_processed_commit()
         
         # If this is a new commit (different from last processed)
         if latest_sha != last_processed_sha:
+            print(f"New commit detected: {latest_sha_short}")
+            
             # Get detailed commit information
             commit_details = await self.get_commit_details(latest_sha)
             
@@ -186,5 +193,12 @@ class GitHubMonitor:
                 
                 # Format and return the message
                 return self.format_commit_message(commit_details)
+        else:
+            if last_processed_sha:
+                print(f"No new commits (latest: {latest_sha_short})")
+            else:
+                print(f"First check - tracking commit: {latest_sha_short}")
+                # Save this as the starting point
+                self.save_last_processed_commit(latest_sha)
         
         return None
