@@ -1,6 +1,0 @@
-[Author] Martin Musil
-[Title] V0.160.0
-
-[Changes]
-- Project has been upgraded to Unreal Engine 5.6.0.
-- Slowly progressing the logic within the C++ PlayerController classes

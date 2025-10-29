@@ -1,40 +1,50 @@
 import discord
 import constants
 import asyncio
-from discord.ext import commands
+from discord.ext import commands, tasks
 
-from utils import send_avalore_update_message, read_avalore_update_file
+from github_integration import GitHubMonitor
 
 # Creates a new bot client with the default intents and enables message content intent
 Intents = discord.Intents.default() # Intents object with the default intents (messages, reactions, etc.)
 Intents.message_content = True # Enable message content intent to receive message content in on_message event since it's disabled by default
 Client = commands.Bot(command_prefix='!Avalore.', intents=Intents) # Create a new bot client with the intents
 
+# Initialize GitHub monitor
+github_monitor = GitHubMonitor()
+
+# Background task to check for new GitHub commits
+@tasks.loop(seconds=constants.GITHUB_CHECK_INTERVAL)
+async def check_github_commits() -> None:
+    """Background task that checks for new commits every 5 minutes."""
+    try:
+        # Check for new commits
+        update_message = await github_monitor.check_for_new_commits()
+        
+        if update_message:
+            # Get the patches channel
+            channel = Client.get_channel(constants.CHANNEL_ID_PATCHES)
+            
+            if isinstance(channel, discord.TextChannel):
+                # Send the update message
+                await channel.send(update_message)
+                print(f"Posted new commit update to Discord at {discord.utils.utcnow()}")
+            else:
+                print("Error: Patches channel not found or is not a text channel.")
+    except Exception as e:
+        print(f"Error in GitHub commit checker: {e}")
+
+@check_github_commits.before_loop
+async def before_check_github_commits() -> None:
+    """Wait until the bot is ready before starting the background task."""
+    await Client.wait_until_ready()
+    print("GitHub commit checker started. Checking every 5 minutes...")
+
 # Decorator to register an on_ready event (whenever the bot is connected to Discord Server)
 @Client.event
 async def on_ready() -> None:
     print(f'{Client.user} has connected to Discord Server!') # Print the bot's username and ID to the console when connected to Discord Server
-
-# Decorator to register a new command named announce_avalore_update (can be invoked using !Avalore.announce_avalore_update)
-@Client.command(name='announce_avalore_update')
-async def announce_avalore_update(ctx: commands.Context) -> None:
-    if ctx.author.id != constants.MUSKADEV_ID: # Check if the user invoking the command is muskadev
-        return # Ignore the command if the user is not muskadev
     
-    # Ask for confirmation before sending the update message to the 'patches' channel
-    await ctx.send("Are you sure you filled fresh update data? Reply with 'yes' to confirm.")
-
-    # Function to check if the message author is the same as the command invoker and the message content is 'yes'
-    def check(m):
-        return m.author == ctx.author and m.content.lower() == 'yes'
-
-    try: # Try to wait for a message that satisfies the check function with a timeout of 'AVALORE_UPDATE_TIMOUT_LIMIT' seconds
-        confirmation = await Client.wait_for('message', check=check, timeout=constants.AVALORE_UPDATE_TIMOUT_LIMIT)
-        if confirmation: # If the confirmation message is received
-            channel = Client.get_channel(constants.CHANNEL_ID_PATCHES) # Get the 'channel' object from the channel ID
-            if isinstance(channel, discord.TextChannel): # Check if the channel is a TextChannel
-                await send_avalore_update_message(channel, read_avalore_update_file('avalore_update_data.txt')) # Send the update message to the 'patches' channel
-            else:
-                await ctx.send("Error: The specified channel is not a text channel or could not be found.")
-    except asyncio.TimeoutError: # If the timeout limit is reached without receiving the confirmation message (the user didn't reply with 'yes')
-        await ctx.send("Update announcement cancelled. Please try again.") # Send a message to the command invoker that the update announcement is cancelled
+    # Start the GitHub commit checker if it's not already running
+    if not check_github_commits.is_running():
+        check_github_commits.start()
