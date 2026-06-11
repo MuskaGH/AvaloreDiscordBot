@@ -4,22 +4,34 @@ import threading
 import sys
 import os
 from datetime import datetime
-from io import StringIO
 import asyncio
-from bot import Client
+import constants
+from bot import (
+    Client,
+    force_github_commit_check,
+    get_github_check_interval,
+    set_github_check_interval,
+)
 from dotenv import load_dotenv
 
 class BotGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Avalore Discord Bot Manager")
-        self.root.geometry("800x600")
+        self.root.geometry("1000x600")
+        self.root.minsize(980, 600)
         self.root.resizable(True, True)
+        self.gui_thread_id = threading.get_ident()
         
         # Bot state
         self.bot_running = False
         self.bot_thread = None
         self.bot_task = None
+        self.force_check_running = False
+        self.interval_options = list(constants.GITHUB_CHECK_INTERVAL_OPTIONS)
+        self.interval_by_label = {label: seconds for label, seconds in self.interval_options}
+        self.interval_label_by_seconds = {seconds: label for label, seconds in self.interval_options}
+        self.check_interval_seconds = get_github_check_interval()
         
         # Load environment variables
         load_dotenv()
@@ -47,7 +59,7 @@ class BotGUI:
         title_label.pack(pady=15)
         
         # Control Frame
-        control_frame = tk.Frame(self.root, bg="#f0f0f0", height=80)
+        control_frame = tk.Frame(self.root, bg="#f0f0f0", height=88)
         control_frame.pack(fill=tk.X, padx=10, pady=10)
         control_frame.pack_propagate(False)
         
@@ -69,6 +81,28 @@ class BotGUI:
             bg="#f0f0f0"
         )
         self.status_label.pack(side=tk.LEFT, padx=5)
+
+        # Interval selector
+        interval_frame = tk.Frame(control_frame, bg="#f0f0f0")
+        interval_frame.pack(side=tk.LEFT, padx=18)
+
+        tk.Label(
+            interval_frame,
+            text="Check every:",
+            font=("Arial", 10),
+            bg="#f0f0f0"
+        ).pack(side=tk.LEFT, padx=5)
+
+        self.interval_var = tk.StringVar(value=self.get_interval_label(self.check_interval_seconds))
+        self.interval_combo = ttk.Combobox(
+            interval_frame,
+            textvariable=self.interval_var,
+            values=[label for label, _ in self.interval_options],
+            state="readonly",
+            width=12
+        )
+        self.interval_combo.pack(side=tk.LEFT, padx=5)
+        self.interval_combo.bind("<<ComboboxSelected>>", self.on_interval_selected)
         
         # Buttons
         button_frame = tk.Frame(control_frame, bg="#f0f0f0")
@@ -102,6 +136,21 @@ class BotGUI:
             state=tk.DISABLED
         )
         self.stop_button.pack(side=tk.LEFT, padx=5)
+
+        self.force_check_button = tk.Button(
+            button_frame,
+            text="🔄 Check Now",
+            command=self.force_check_now,
+            bg="#faa61a",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            width=12,
+            height=2,
+            relief=tk.FLAT,
+            cursor="hand2",
+            state=tk.DISABLED
+        )
+        self.force_check_button.pack(side=tk.LEFT, padx=5)
         
         self.clear_button = tk.Button(
             button_frame,
@@ -146,19 +195,50 @@ class BotGUI:
         self.log_text.tag_config("warning", foreground="#faa61a")
         self.log_text.tag_config("success", foreground="#43b581")
         
-        # Footer
-        footer_frame = tk.Frame(self.root, bg="#f0f0f0", height=30)
-        footer_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        footer_frame.pack_propagate(False)
-        
-        footer_label = tk.Label(
-            footer_frame,
-            text="GitHub Auto-Monitor: Checks every 5 minutes | Made for Avalore",
-            font=("Arial", 8),
-            bg="#f0f0f0",
-            fg="#666666"
-        )
-        footer_label.pack(pady=5)
+    def get_interval_label(self, seconds):
+        """Return the dropdown label for an interval."""
+        return self.interval_label_by_seconds.get(seconds, f"{seconds} seconds")
+
+    def get_selected_interval_seconds(self):
+        """Return the selected GitHub check interval in seconds."""
+        return self.interval_by_label.get(self.interval_var.get(), constants.GITHUB_CHECK_INTERVAL)
+
+    def get_bot_loop(self):
+        """Return the Discord bot loop when it is ready."""
+        loop = getattr(Client, "loop", None)
+
+        if loop and hasattr(loop, "call_soon_threadsafe") and not loop.is_closed():
+            return loop
+
+        return None
+
+    def on_interval_selected(self, event=None):
+        """Apply the selected GitHub check interval."""
+        self.check_interval_seconds = self.get_selected_interval_seconds()
+
+        if self.bot_running:
+            loop = self.get_bot_loop()
+            if not loop:
+                try:
+                    set_github_check_interval(self.check_interval_seconds)
+                except Exception as e:
+                    self.append_log(f"Error setting check interval: {str(e)}", "error")
+                return
+
+            loop.call_soon_threadsafe(self.apply_interval_on_bot_loop, self.check_interval_seconds)
+            return
+
+        try:
+            set_github_check_interval(self.check_interval_seconds)
+        except Exception as e:
+            self.append_log(f"Error setting check interval: {str(e)}", "error")
+
+    def apply_interval_on_bot_loop(self, seconds):
+        """Apply interval changes from the Discord bot thread."""
+        try:
+            set_github_check_interval(seconds)
+        except Exception as e:
+            self.append_log(f"Error setting check interval: {str(e)}", "error")
         
     def setup_logging(self):
         """Redirect stdout to capture print statements"""
@@ -187,6 +267,13 @@ class BotGUI:
         
     def append_log(self, text, tag="info"):
         """Append text to log with timestamp"""
+        if threading.get_ident() != self.gui_thread_id:
+            try:
+                self.root.after(0, self.append_log, text, tag)
+            except tk.TclError:
+                pass
+            return
+
         timestamp = datetime.now().strftime("%H:%M:%S")
         
         self.log_text.config(state=tk.NORMAL)
@@ -209,17 +296,25 @@ class BotGUI:
             self.status_label.config(text="Running", fg="#43b581")
             self.start_button.config(state=tk.DISABLED)
             self.stop_button.config(state=tk.NORMAL)
+            self.force_check_button.config(state=tk.DISABLED if self.force_check_running else tk.NORMAL)
         else:
             self.status_indicator.itemconfig(self.status_circle, fill="#ff4444")
             self.status_label.config(text="Stopped", fg="#ff4444")
             self.start_button.config(state=tk.NORMAL)
             self.stop_button.config(state=tk.DISABLED)
+            self.force_check_button.config(state=tk.DISABLED)
             
     def start_bot(self):
         """Start the Discord bot in a separate thread"""
         if not self.bot_running:
             if not self.bot_token or self.bot_token == "":
                 self.append_log("ERROR: DISCORD_BOT_TOKEN not found in .env file!", "error")
+                return
+
+            try:
+                set_github_check_interval(self.check_interval_seconds)
+            except Exception as e:
+                self.append_log(f"ERROR: Could not set GitHub check interval: {str(e)}", "error")
                 return
                 
             self.bot_running = True
@@ -246,17 +341,56 @@ class BotGUI:
             self.append_log(f"ERROR: {str(e)}", "error")
             self.bot_running = False
             self.root.after(0, self.update_status, False)
+
+    def force_check_now(self):
+        """Run an immediate GitHub commit check."""
+        if not self.bot_running:
+            self.append_log("Start the bot before running a manual check.", "warning")
+            return
+
+        loop = self.get_bot_loop()
+        if not loop:
+            self.append_log("Bot event loop is not ready yet; try again in a moment.", "warning")
+            return
+
+        self.force_check_running = True
+        self.update_status(True)
+        self.append_log("Manual GitHub check queued.", "info")
+
+        future = asyncio.run_coroutine_threadsafe(force_github_commit_check(), loop)
+        future.add_done_callback(self.on_force_check_done)
+
+    def on_force_check_done(self, future):
+        """Handle completion of a manual GitHub check."""
+        def finish():
+            self.force_check_running = False
+            self.update_status(self.bot_running)
+
+            try:
+                future.result()
+            except Exception as e:
+                self.append_log(f"Manual GitHub check failed: {str(e)}", "error")
+
+        try:
+            self.root.after(0, finish)
+        except tk.TclError:
+            pass
             
     def stop_bot(self):
         """Stop the Discord bot"""
         if self.bot_running:
             self.append_log("Stopping bot...", "warning")
             self.bot_running = False
+            self.force_check_running = False
             
             try:
                 # Close the bot
-                asyncio.run_coroutine_threadsafe(Client.close(), Client.loop)
-                self.append_log("Bot stopped successfully", "info")
+                loop = self.get_bot_loop()
+                if loop:
+                    asyncio.run_coroutine_threadsafe(Client.close(), loop)
+                    self.append_log("Bot stopped successfully", "info")
+                else:
+                    self.append_log("Bot event loop was already stopped", "warning")
             except Exception as e:
                 self.append_log(f"Error stopping bot: {str(e)}", "error")
             

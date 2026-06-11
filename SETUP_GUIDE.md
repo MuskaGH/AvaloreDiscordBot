@@ -5,7 +5,8 @@ This guide will help you set up the automated GitHub commit monitoring for your 
 ## Overview
 
 The bot now automatically:
-- Checks your GitHub repository every 5 minutes for new commits
+- Checks every GitHub repository branch on the configured interval
+- Posts every missed commit since the last successful scan, not only the latest commit
 - Extracts commit information (author, message, changed files)
 - Formats and posts updates to your Discord channel automatically
 - No manual intervention needed!
@@ -53,7 +54,8 @@ When you first run the bot, it needs to know which commit to start from. You hav
 **Option B: Manually set starting point**
 - Create a file named `last_commit.txt` in your project directory
 - Put the SHA of the last commit you want to start from (you can find this on GitHub)
-- The bot will only post commits AFTER this one
+- On the next scan, the bot will migrate that single SHA into branch-aware state
+- The bot will only post commits after that SHA on branches that contain it; existing branches without that SHA are tracked from their current head
 
 ### 4. Run the Bot
 
@@ -71,7 +73,7 @@ python main.py
 You should see:
 ```
 [Bot Username] has connected to Discord Server!
-GitHub commit checker started. Checking every 5 minutes...
+GitHub commit checker started. Checking every 1 minute...
 ```
 
 **Note**: Keep the window open while the bot is running. Closing it will stop the bot.
@@ -88,18 +90,21 @@ To test if it's working:
 ## How It Works
 
 ### Automatic Posting
-- Every 5 minutes, the bot checks GitHub for new commits
-- If a new commit is found, it:
+- On the configured interval, the bot checks GitHub for repository branches
+- For each branch, it compares the branch head to that branch's saved commit SHA
+- If new commits are found, it:
   - Extracts the commit author, message, and changed files
   - Formats it into a nice Discord message
-  - Posts it automatically to your patches channel
-  - Saves the commit SHA so it doesn't post duplicates
+  - Adds the source branch to the message
+  - Posts every missed commit automatically to your patches channel, oldest first
+  - Saves the latest commit SHA per branch and a repository-wide posted SHA history so the same commit is not posted again after a merge
 
 ### Message Format
 The automated messages include:
 - Date and time (CET timezone)
 - Commit author
 - Commit SHA (short version)
+- Source branch
 - Commit title
 - Commit description (if provided)
 - List of changed files (added, modified, removed)
@@ -112,9 +117,14 @@ The automated messages include:
 You can customize the behavior in `constants.py`:
 
 ```python
-# Check interval (in seconds)
-GITHUB_CHECK_INTERVAL = 300  # 5 minutes (default)
-# Change to 600 for 10 minutes, 900 for 15 minutes, etc.
+# Default check interval (in seconds)
+GITHUB_CHECK_INTERVAL = 60  # 1 minute default
+
+# Safety cap for one branch backfill per check
+GITHUB_MAX_COMMITS_PER_BRANCH = 100
+
+# Maximum commit SHAs kept for cross-branch duplicate prevention
+GITHUB_POSTED_COMMITS_LIMIT = 5000
 
 # Repository details
 GITHUB_REPO_OWNER = "MuskaGH"
@@ -139,10 +149,12 @@ GITHUB_REPO_NAME = "Avalore"
 ### Duplicate posts
 - The `last_commit.txt` file may have been deleted
 - The bot will auto-recover by tracking from the next commit
+- The bot deduplicates exact commit SHAs across branches, so a commit posted from a feature branch will not be posted again when that same SHA reaches `main`
+- Squash merges and cherry-picks create new commit SHAs, so they can still be reported as separate commits
 
 ## Important Notes
 
-1. **Keep the bot running**: The bot must be running continuously to check for commits every 5 minutes
+1. **Keep the bot running**: The bot must be running continuously to check for commits on the configured interval
 2. **Token security**: Never share your GitHub token or commit it to public repositories
 3. **Rate limits**: GitHub API has rate limits (5000 requests/hour with token). Checking every 5 minutes uses ~12 requests/hour, so you're well within limits
 4. **Private repo**: Your repository stays private - only the bot can access it with the token
