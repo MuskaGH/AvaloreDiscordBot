@@ -2,9 +2,32 @@ import aiohttp
 import constants
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
 import os
+
+
+@dataclass
+class GitHubCommitUpdate:
+    commit_sha: str
+    timestamp: str
+    order: int
+    message: str
+
+
+@dataclass
+class GitHubCommitCheckResult:
+    updates: List[GitHubCommitUpdate]
+    branch_state: Dict[str, str]
+    next_branch_state: Dict[str, str]
+    posted_commits: List[str]
+    should_save_state: bool = True
+
+    @property
+    def messages(self) -> List[str]:
+        return [update.message for update in self.updates]
+
 
 class GitHubMonitor:
     """Monitors GitHub repository for new commits and formats update messages."""
@@ -397,17 +420,55 @@ class GitHubMonitor:
                 ""
             ])
             
+            change_lines = []
+
             # Add commit body if present (renamed to "Changes")
             if body:
                 formatted_lines.append("[Changes]")
-                formatted_lines.extend(self._format_commit_body(body))
-            
-            formatted_lines.append("```")
-            
-            return "\n".join(formatted_lines)
+                change_lines = self._format_commit_body(body)
+
+            return self._fit_commit_message(formatted_lines, change_lines)
         except Exception as e:
             print(f"Error formatting commit message: {e}")
             return "Failed to format commit message."
+
+    def _fit_commit_message(self, base_lines: List[str], change_lines: List[str]) -> str:
+        """Return one Discord-safe commit message, truncating changes if needed."""
+        closing_line = "```"
+        truncated_notice = "- Changes truncated to fit Discord's 2000-character message limit."
+        fitted_lines = list(base_lines)
+        base_line_count = len(base_lines)
+
+        for change_line in change_lines:
+            candidate_message = "\n".join(fitted_lines + [change_line, closing_line])
+
+            if len(candidate_message) <= constants.DISCORD_MESSAGE_LIMIT:
+                fitted_lines.append(change_line)
+                continue
+
+            while len(fitted_lines) > base_line_count:
+                notice_message = "\n".join(fitted_lines + [truncated_notice, closing_line])
+
+                if len(notice_message) <= constants.DISCORD_MESSAGE_LIMIT:
+                    break
+
+                fitted_lines.pop()
+
+            notice_message = "\n".join(fitted_lines + [truncated_notice, closing_line])
+
+            if len(notice_message) <= constants.DISCORD_MESSAGE_LIMIT:
+                fitted_lines.append(truncated_notice)
+
+            break
+
+        message = "\n".join(fitted_lines + [closing_line])
+
+        if len(message) <= constants.DISCORD_MESSAGE_LIMIT:
+            return message
+
+        overflow_notice = "\n[Message truncated to fit Discord's 2000-character limit.]"
+        allowed_length = constants.DISCORD_MESSAGE_LIMIT - len(overflow_notice)
+        return message[:allowed_length].rstrip() + overflow_notice
 
     def _format_commit_body(self, body: str) -> List[str]:
         """Format a commit body into Discord-friendly bullet lines."""
@@ -507,15 +568,15 @@ class GitHubMonitor:
             or ""
         )
     
-    async def check_for_new_commits(self) -> List[str]:
-        """Check every branch for new commits and return formatted messages."""
+    async def check_for_new_commit_updates(self) -> GitHubCommitCheckResult:
+        """Check every branch for new commits without saving delivery state."""
         print("Checking GitHub for new commits...")
 
         branches = await self.get_branches()
 
         if not branches:
             print("Failed to fetch branches from GitHub")
-            return []
+            return GitHubCommitCheckResult([], {}, {}, [], should_save_state=False)
 
         branch_state, posted_commits, legacy_sha, posted_commits_present = self.get_processed_commit_state()
         next_branch_state = {}
@@ -594,16 +655,33 @@ class GitHubMonitor:
                         commit_details or commit_data,
                         branch_name=branch_name,
                     )
-                    pending_updates.append((
-                        self._get_commit_timestamp(commit_details or commit_data),
-                        update_order,
-                        formatted_commit,
-                    ))
+                    pending_updates.append(
+                        GitHubCommitUpdate(
+                            commit_sha=commit_sha,
+                            timestamp=self._get_commit_timestamp(commit_details or commit_data),
+                            order=update_order,
+                            message=formatted_commit,
+                        )
+                    )
                     update_order += 1
-                    posted_commits.append(commit_sha)
                     posted_commit_shas.add(commit_sha)
 
-        self.save_processed_commits(next_branch_state, posted_commits)
-        pending_updates.sort(key=lambda update: (update[0], update[1]))
+        pending_updates.sort(key=lambda update: (update.timestamp, update.order))
 
-        return [message for _, _, message in pending_updates]
+        return GitHubCommitCheckResult(
+            updates=pending_updates,
+            branch_state=branch_state,
+            next_branch_state=next_branch_state,
+            posted_commits=posted_commits,
+        )
+
+    async def check_for_new_commits(self) -> List[str]:
+        """Check every branch for new commits and return formatted messages."""
+        check_result = await self.check_for_new_commit_updates()
+
+        if check_result.should_save_state:
+            posted_commits = list(check_result.posted_commits)
+            posted_commits.extend(update.commit_sha for update in check_result.updates)
+            self.save_processed_commits(check_result.next_branch_state, posted_commits)
+
+        return check_result.messages

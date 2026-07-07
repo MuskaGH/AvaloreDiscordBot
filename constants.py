@@ -21,4 +21,5 @@ GITHUB_CHECK_INTERVAL_OPTIONS = (
 GITHUB_CHECK_INTERVAL = 60  # Default: check every 1 minute (60 seconds)
 GITHUB_MAX_COMMITS_PER_BRANCH = 100  # Safety cap for one branch backfill per check
 GITHUB_POSTED_COMMITS_LIMIT = 5000  # Maximum commit SHAs kept for cross-branch dedupe
+DISCORD_MESSAGE_LIMIT = 2000  # Discord content limit for a single message
 LAST_COMMIT_FILE = "last_commit.txt"  # File to store the last processed commit SHA

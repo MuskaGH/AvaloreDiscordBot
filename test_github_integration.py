@@ -27,12 +27,15 @@ class TempStateMixin:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.old_last_commit_file = constants.LAST_COMMIT_FILE
         self.old_posted_commits_limit = constants.GITHUB_POSTED_COMMITS_LIMIT
+        self.old_discord_message_limit = constants.DISCORD_MESSAGE_LIMIT
         constants.LAST_COMMIT_FILE = os.path.join(self.temp_dir.name, "last_commit.txt")
         constants.GITHUB_POSTED_COMMITS_LIMIT = 5000
+        constants.DISCORD_MESSAGE_LIMIT = 2000
 
     def tearDown(self):
         constants.LAST_COMMIT_FILE = self.old_last_commit_file
         constants.GITHUB_POSTED_COMMITS_LIMIT = self.old_posted_commits_limit
+        constants.DISCORD_MESSAGE_LIMIT = self.old_discord_message_limit
         self.temp_dir.cleanup()
 
     def write_raw_state(self, content):
@@ -113,6 +116,23 @@ class GitHubMonitorStateTests(TempStateMixin, unittest.TestCase):
         self.assertEqual([], posted_commits)
         self.assertIsNone(legacy_sha)
         self.assertFalse(posted_commits_present)
+
+
+class GitHubMonitorFormattingTests(TempStateMixin, unittest.TestCase):
+    def test_commit_message_is_truncated_to_discord_limit(self):
+        monitor = GitHubMonitor()
+        long_body = "\n".join(f"- Change item {index} with detailed explanation." for index in range(200))
+        commit_data = make_commit(
+            "9" * 40,
+            f"Large commit\n{long_body}",
+            "2026-01-06T00:00:00Z",
+        )
+
+        message = monitor.format_commit_message(commit_data, branch_name="main")
+
+        self.assertLessEqual(len(message), constants.DISCORD_MESSAGE_LIMIT)
+        self.assertIn("Changes truncated to fit Discord's 2000-character message limit.", message)
+        self.assertTrue(message.endswith("```"))
 
 
 class GitHubMonitorScanTests(TempStateMixin, unittest.IsolatedAsyncioTestCase):
@@ -214,6 +234,32 @@ class GitHubMonitorScanTests(TempStateMixin, unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], messages)
         self.assertEqual(already_posted, saved_state["branches"]["main"])
         self.assertEqual([already_posted], saved_state["posted_commits"])
+
+    async def test_collecting_updates_does_not_advance_state_before_delivery(self):
+        old_main = "7" * 40
+        new_main = "8" * 40
+        new_main_commit = make_commit(
+            new_main,
+            "Needs Discord delivery first",
+            "2026-01-05T00:00:00Z",
+        )
+        initial_state = {
+            "branches": {"main": old_main},
+            "posted_commits": [],
+        }
+        self.write_json_state(initial_state)
+        monitor = FakeGitHubMonitor(
+            branches=[make_branch("main", new_main)],
+            branch_commits={"main": ([new_main_commit], True)},
+            commit_details={new_main: new_main_commit},
+        )
+
+        check_result = await monitor.check_for_new_commit_updates()
+        saved_state = self.read_json_state()
+
+        self.assertEqual(1, len(check_result.updates))
+        self.assertEqual(new_main, check_result.updates[0].commit_sha)
+        self.assertEqual(initial_state, saved_state)
 
 
 if __name__ == "__main__":

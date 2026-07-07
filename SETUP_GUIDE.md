@@ -97,6 +97,8 @@ To test if it's working:
   - Formats it into a nice Discord message
   - Adds the source branch to the message
   - Posts every missed commit automatically to your patches channel, oldest first
+  - Truncates very long change descriptions so Discord does not reject the message
+  - Saves the delivered commit SHA after Discord accepts the message
   - Saves the latest commit SHA per branch and a repository-wide posted SHA history so the same commit is not posted again after a merge
 
 ### Message Format

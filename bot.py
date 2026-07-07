@@ -65,26 +65,48 @@ async def run_github_commit_check(manual: bool = False) -> bool:
         if manual:
             print("Manual GitHub check requested.")
 
-        # Check for new commits
-        update_messages = await github_monitor.check_for_new_commits()
+        # Check for new commits, but do not advance state until Discord delivery succeeds.
+        commit_check = await github_monitor.check_for_new_commit_updates()
 
-        if update_messages:
+        if commit_check.updates:
             # Get the patches channel
             channel = Client.get_channel(constants.CHANNEL_ID_PATCHES)
 
             if isinstance(channel, discord.TextChannel):
-                # Send every queued commit update in chronological order.
-                for update_message in update_messages:
-                    await channel.send(update_message)
+                posted_commits = list(commit_check.posted_commits)
+
+                try:
+                    # Send every queued commit update in chronological order.
+                    for commit_update in commit_check.updates:
+                        await channel.send(commit_update.message)
+                        posted_commits.append(commit_update.commit_sha)
+                        github_monitor.save_processed_commits(
+                            commit_check.branch_state,
+                            posted_commits,
+                        )
+                except Exception as e:
+                    print(f"Error sending GitHub commit update to Discord: {e}")
+                    return False
+
+                github_monitor.save_processed_commits(
+                    commit_check.next_branch_state,
+                    posted_commits,
+                )
 
                 print(
-                    f"Posted {len(update_messages)} new commit update(s) "
+                    f"Posted {len(commit_check.updates)} new commit update(s) "
                     f"to Discord at {discord.utils.utcnow()}"
                 )
                 return True
 
             print("Error: Patches channel not found or is not a text channel.")
             return False
+
+        if commit_check.should_save_state:
+            github_monitor.save_processed_commits(
+                commit_check.next_branch_state,
+                commit_check.posted_commits,
+            )
 
         if manual:
             print("Manual GitHub check completed; no new commits found.")
