@@ -20,9 +20,9 @@ On Error Resume Next
 WshShell.Run Command, 1, False
 
 If Err.Number <> 0 Then
-    MsgBox "Could not start Avalore Discord Bot." & vbCrLf & vbCrLf & _
+    MsgBox "Could not start CommitsBot." & vbCrLf & vbCrLf & _
         "Command: " & Command & vbCrLf & _
-        "Error: " & Err.Description, vbCritical, "Avalore Bot"
+        "Error: " & Err.Description, vbCritical, "CommitsBot"
 End If
 
 Set Fso = Nothing

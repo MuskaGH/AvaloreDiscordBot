@@ -128,10 +128,39 @@ GITHUB_MAX_COMMITS_PER_BRANCH = 100
 # Maximum commit SHAs kept for cross-branch duplicate prevention
 GITHUB_POSTED_COMMITS_LIMIT = 5000
 
-# Repository details
-GITHUB_REPO_OWNER = "MuskaGH"
-GITHUB_REPO_NAME = "Avalore"
+# Monitored projects (repository + Discord channel pairs)
+PROJECTS = (
+    ProjectConfig(
+        key="avalore",
+        display_name="Avalore",
+        repo_owner="MuskaGH",
+        repo_name="Avalore",
+        channel_id=1324115430994083840,
+        state_file="last_commit.txt",
+    ),
+    ...
+)
 ```
+
+## Monitoring Multiple Projects
+
+The bot can watch any number of repositories and post each one's updates to a different channel (even on a different Discord server). Each entry in `PROJECTS` in `constants.py` defines one repository:
+
+- `key` – short identifier used in log messages
+- `display_name` – name shown in the Discord message header ("New commit to X's GitHub repository detected!")
+- `repo_owner` / `repo_name` – the GitHub repository to watch
+- `channel_id` – the Discord channel that receives the updates (`0` means "not configured yet"; the project is skipped with a console warning)
+- `state_file` – per-project file storing branch heads and the posted-commit history (must be unique per project)
+
+To add a new project:
+
+1. Invite the bot to the target Discord server (OAuth2 URL from the Discord Developer Portal, with permission to send messages)
+2. Right-click the updates channel → **Copy Channel ID** (enable Developer Mode in Discord settings if you don't see it) and put it into the project's `channel_id`
+   - For a **private** channel, also grant the bot access there: channel settings → Permissions → add the bot (or its role) with **View Channel** and **Send Messages**, otherwise the bot cannot see the channel and will log "channel not found"
+3. Make sure the `GITHUB_TOKEN` has access to the new repository (a classic PAT with `repo` scope covers all repositories of your account; a fine-grained token must have the repository added explicitly)
+4. Restart the bot — on the first check it starts tracking each branch from its current head and only posts commits made after that
+
+Tip: the bot's username is global, but you can give it a different **nickname per server** (right-click the bot member → Change Nickname) if you want it to carry the project's name on each server instead of "CommitsBot".
 
 ## Troubleshooting
 
@@ -140,8 +169,8 @@ GITHUB_REPO_NAME = "Avalore"
 - Generate a new token and update `constants.py`
 
 ### "Repository not found"
-- Check that `GITHUB_REPO_OWNER` and `GITHUB_REPO_NAME` are correct
-- Ensure your token has `repo` scope access
+- Check that the project's `repo_owner` and `repo_name` in `PROJECTS` are correct
+- Ensure your token has `repo` scope access (and, for fine-grained tokens, that the repository is included)
 
 ### Bot doesn't post updates
 - Check the console for error messages

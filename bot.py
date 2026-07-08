@@ -8,12 +8,15 @@ from github_integration import GitHubMonitor
 # Creates a new bot client with the default intents and enables message content intent
 Intents = discord.Intents.default() # Intents object with the default intents (messages, reactions, etc.)
 Intents.message_content = True # Enable message content intent to receive message content in on_message event since it's disabled by default
-Client = commands.Bot(command_prefix='!Avalore.', intents=Intents) # Create a new bot client with the intents
+Client = commands.Bot(command_prefix='!CommitsBot.', intents=Intents) # Create a new bot client with the intents
 
-# Initialize GitHub monitor
-github_monitor = GitHubMonitor()
+# Initialize one GitHub monitor per configured project
+project_monitors = tuple(
+    (project, GitHubMonitor(project)) for project in constants.PROJECTS
+)
 _github_check_interval = constants.GITHUB_CHECK_INTERVAL
 _github_check_lock = None
+_unconfigured_projects_warned = set()
 
 
 def format_github_check_interval(seconds: int) -> str:
@@ -52,8 +55,59 @@ def _get_github_check_lock() -> asyncio.Lock:
     return _github_check_lock
 
 
+async def _run_project_commit_check(
+    project: constants.ProjectConfig,
+    monitor: GitHubMonitor,
+) -> bool:
+    """Check one project for new commits and post them to its Discord channel."""
+    # Check for new commits, but do not advance state until Discord delivery succeeds.
+    commit_check = await monitor.check_for_new_commit_updates()
+
+    if commit_check.updates:
+        # Get the project's updates channel
+        channel = Client.get_channel(project.channel_id)
+
+        if isinstance(channel, discord.TextChannel):
+            posted_commits = list(commit_check.posted_commits)
+
+            try:
+                # Send every queued commit update in chronological order.
+                for commit_update in commit_check.updates:
+                    await channel.send(commit_update.message)
+                    posted_commits.append(commit_update.commit_sha)
+                    monitor.save_processed_commits(
+                        commit_check.branch_state,
+                        posted_commits,
+                    )
+            except Exception as e:
+                print(f"Error sending {project.display_name} commit update to Discord: {e}")
+                return False
+
+            monitor.save_processed_commits(
+                commit_check.next_branch_state,
+                posted_commits,
+            )
+
+            print(
+                f"Posted {len(commit_check.updates)} new {project.display_name} commit update(s) "
+                f"to Discord at {discord.utils.utcnow()}"
+            )
+            return True
+
+        print(f"Error: updates channel for {project.display_name} not found or is not a text channel.")
+        return False
+
+    if commit_check.should_save_state:
+        monitor.save_processed_commits(
+            commit_check.next_branch_state,
+            commit_check.posted_commits,
+        )
+
+    return False
+
+
 async def run_github_commit_check(manual: bool = False) -> bool:
-    """Run one GitHub commit check and post to Discord if a new commit exists."""
+    """Run one GitHub commit check across all projects and post any new commits."""
     check_lock = _get_github_check_lock()
 
     if check_lock.locked():
@@ -65,53 +119,28 @@ async def run_github_commit_check(manual: bool = False) -> bool:
         if manual:
             print("Manual GitHub check requested.")
 
-        # Check for new commits, but do not advance state until Discord delivery succeeds.
-        commit_check = await github_monitor.check_for_new_commit_updates()
+        posted_any = False
 
-        if commit_check.updates:
-            # Get the patches channel
-            channel = Client.get_channel(constants.CHANNEL_ID_PATCHES)
+        for project, monitor in project_monitors:
+            if not project.channel_id:
+                if project.key not in _unconfigured_projects_warned:
+                    print(
+                        f"Skipping {project.display_name}: no Discord channel configured "
+                        f"(set channel_id for '{project.key}' in constants.py)."
+                    )
+                    _unconfigured_projects_warned.add(project.key)
+                continue
 
-            if isinstance(channel, discord.TextChannel):
-                posted_commits = list(commit_check.posted_commits)
+            try:
+                if await _run_project_commit_check(project, monitor):
+                    posted_any = True
+            except Exception as e:
+                print(f"Error checking {project.display_name} for new commits: {e}")
 
-                try:
-                    # Send every queued commit update in chronological order.
-                    for commit_update in commit_check.updates:
-                        await channel.send(commit_update.message)
-                        posted_commits.append(commit_update.commit_sha)
-                        github_monitor.save_processed_commits(
-                            commit_check.branch_state,
-                            posted_commits,
-                        )
-                except Exception as e:
-                    print(f"Error sending GitHub commit update to Discord: {e}")
-                    return False
-
-                github_monitor.save_processed_commits(
-                    commit_check.next_branch_state,
-                    posted_commits,
-                )
-
-                print(
-                    f"Posted {len(commit_check.updates)} new commit update(s) "
-                    f"to Discord at {discord.utils.utcnow()}"
-                )
-                return True
-
-            print("Error: Patches channel not found or is not a text channel.")
-            return False
-
-        if commit_check.should_save_state:
-            github_monitor.save_processed_commits(
-                commit_check.next_branch_state,
-                commit_check.posted_commits,
-            )
-
-        if manual:
+        if manual and not posted_any:
             print("Manual GitHub check completed; no new commits found.")
 
-        return False
+        return posted_any
 
 
 async def force_github_commit_check() -> bool:

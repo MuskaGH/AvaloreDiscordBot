@@ -34,9 +34,12 @@ class GitHubMonitor:
 
     _bullet_prefix_pattern = re.compile(r"^\s*(?:(?:[-*\u2022\u2013\u2014])\s+|\d+[\.)]\s+)")
     
-    def __init__(self):
+    def __init__(self, project: Optional[constants.ProjectConfig] = None):
+        self.project = project if project is not None else constants.PROJECTS[0]
+        self.state_file = self.project.state_file
+        self.log_prefix = f"[{self.project.display_name}] "
         self.api_base = "https://api.github.com"
-        self.repo_url = f"{self.api_base}/repos/{constants.GITHUB_REPO_OWNER}/{constants.GITHUB_REPO_NAME}"
+        self.repo_url = f"{self.api_base}/repos/{self.project.repo_owner}/{self.project.repo_name}"
         self.headers = {
             "Accept": "application/vnd.github.v3+json",
             "Authorization": f"token {constants.GITHUB_TOKEN}" if constants.GITHUB_TOKEN else None
@@ -72,10 +75,10 @@ class GitHubMonitor:
     def get_processed_commit_state(self) -> Tuple[Dict[str, str], List[str], Optional[str], bool]:
         """Read branch-aware state, posted SHA history, and legacy single-SHA files."""
         try:
-            if not os.path.exists(constants.LAST_COMMIT_FILE):
+            if not os.path.exists(self.state_file):
                 return {}, [], None, False
 
-            with open(constants.LAST_COMMIT_FILE, 'r', encoding='utf-8') as f:
+            with open(self.state_file, 'r', encoding='utf-8') as f:
                 content = f.read().strip()
 
             if not content:
@@ -139,8 +142,11 @@ class GitHubMonitor:
                 "posted_commits": self._normalize_posted_commits(posted_commits or []),
             }
 
-            with open(constants.LAST_COMMIT_FILE, 'w', encoding='utf-8') as f:
+            # Write to a temp file and swap it in so an interrupted write cannot corrupt the state.
+            temp_file = f"{self.state_file}.tmp"
+            with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(state, f, indent=2)
+            os.replace(temp_file, self.state_file)
         except Exception as e:
             print(f"Error saving last commit file: {e}")
 
@@ -376,7 +382,7 @@ class GitHubMonitor:
 
             if commits:
                 print(
-                    f"Seeded {len(commits)} recent posted commit SHA(s) "
+                    f"{self.log_prefix}Seeded {len(commits)} recent posted commit SHA(s) "
                     f"from tracked branch {branch_name}."
                 )
             else:
@@ -403,7 +409,7 @@ class GitHubMonitor:
             
             # Format the message
             formatted_lines = [
-                "**New commit to Avalore's GitHub repository detected!**",
+                f"**New commit to {self.project.display_name}'s GitHub repository detected!**",
                 "```ini",
                 f"Date: {now.strftime('%d/%m/%Y (CET)')}",
                 f"Time: {now.strftime('%I:%M %p (CET)')}",
@@ -570,12 +576,12 @@ class GitHubMonitor:
     
     async def check_for_new_commit_updates(self) -> GitHubCommitCheckResult:
         """Check every branch for new commits without saving delivery state."""
-        print("Checking GitHub for new commits...")
+        print(f"{self.log_prefix}Checking GitHub for new commits...")
 
         branches = await self.get_branches()
 
         if not branches:
-            print("Failed to fetch branches from GitHub")
+            print(f"{self.log_prefix}Failed to fetch branches from GitHub")
             return GitHubCommitCheckResult([], {}, {}, [], should_save_state=False)
 
         branch_state, posted_commits, legacy_sha, posted_commits_present = self.get_processed_commit_state()
@@ -605,11 +611,11 @@ class GitHubMonitor:
                 next_branch_state[branch_name] = head_sha
 
                 if not baseline_sha:
-                    print(f"First check - tracking branch {branch_name}: {head_sha[:7]}")
+                    print(f"{self.log_prefix}First check - tracking branch {branch_name}: {head_sha[:7]}")
                     continue
 
                 if head_sha == baseline_sha:
-                    print(f"No new commits on {branch_name} (latest: {head_sha[:7]})")
+                    print(f"{self.log_prefix}No new commits on {branch_name} (latest: {head_sha[:7]})")
                     continue
 
                 commits, found_baseline = await self.get_branch_commits_since(
@@ -619,23 +625,23 @@ class GitHubMonitor:
                 )
 
                 if not commits:
-                    print(f"No new commits on {branch_name} (latest: {head_sha[:7]})")
+                    print(f"{self.log_prefix}No new commits on {branch_name} (latest: {head_sha[:7]})")
                     continue
 
                 if not found_baseline and last_processed_sha is None:
                     print(
-                        f"Branch {branch_name} does not contain the legacy starting commit; "
+                        f"{self.log_prefix}Branch {branch_name} does not contain the legacy starting commit; "
                         f"tracking from current head: {head_sha[:7]}"
                     )
                     continue
 
                 if not found_baseline:
                     print(
-                        f"Saved commit for {branch_name} was not found within "
+                        f"{self.log_prefix}Saved commit for {branch_name} was not found within "
                         f"{constants.GITHUB_MAX_COMMITS_PER_BRANCH} commits; posting fetched commits."
                     )
 
-                print(f"New commits detected on {branch_name}: {len(commits)}")
+                print(f"{self.log_prefix}New commits detected on {branch_name}: {len(commits)}")
 
                 # GitHub returns newest first. Discord should receive oldest first.
                 for commit_data in reversed(commits):
@@ -646,7 +652,7 @@ class GitHubMonitor:
                         continue
 
                     if commit_sha in posted_commit_shas:
-                        print(f"Skipping already posted commit {commit_sha[:7]} on {branch_name}.")
+                        print(f"{self.log_prefix}Skipping already posted commit {commit_sha[:7]} on {branch_name}.")
                         continue
 
                     commit_details = await self.get_commit_details(commit_sha, session=session)

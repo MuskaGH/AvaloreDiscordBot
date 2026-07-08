@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 class BotGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Avalore Discord Bot Manager")
+        self.root.title("CommitsBot Manager")
         self.root.geometry("1000x600")
         self.root.minsize(980, 600)
         self.root.resizable(True, True)
@@ -51,7 +51,7 @@ class BotGUI:
         
         title_label = tk.Label(
             title_frame, 
-            text="🤖 Avalore Discord Bot Manager", 
+            text="🤖 CommitsBot Manager",
             font=("Arial", 16, "bold"),
             bg="#5865F2",
             fg="white"
@@ -319,7 +319,7 @@ class BotGUI:
                 
             self.bot_running = True
             self.update_status(True)
-            self.append_log("Starting Avalore Discord Bot...", "success")
+            self.append_log("Starting CommitsBot...", "success")
             
             # Start bot in separate thread
             self.bot_thread = threading.Thread(target=self.run_bot, daemon=True)
